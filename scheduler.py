@@ -7,7 +7,7 @@
 import sys
 import socket
 from Queue import Queue
-from threading import Thread, BoundedSemaphore
+from threading import Thread, Semaphore
 import time
 
 #when not all parameters were given
@@ -16,44 +16,68 @@ if len(sys.argv) != 2:
 
 HOST = ''
 PORT = int(sys.argv[1])
-Qtip = Queue(maxsize = 0)
-num_threads = 2
+Qtip = Queue()
 M = {}
-maxMsg = 7
-countmsg = 0
+maxMsg = 5
 
 #semaphore named lock. This will protect the critical region
-lock = BoundedSemaphore()
+lock = Semaphore()
+#
+lockOther = Semaphore(0)
 
 #this function is for the producer thread. This will take the message recieved from mobile devices
 #and put them in a queue
-def recieve(msg):
-    global countmsg
-    lock.acquire()
-    countmsg += 1
-    Qtip.put(msg)
-    lock.release()
+def recieve():
+    global maxMsg
+    global Qtip
+    while maxMsg:
+        # receive data from client (data, addr)
+        d = s.recvfrom(1024)
+        data = d[0]
+        addr = d[1]
+
+        if not data: 
+            break
+
+        #create a reply for the mobile device
+        reply = 'OK...' + data
+        #send the reply to the mobile device
+        s.sendto(reply , addr)
+
+        lock.acquire()
+        Qtip.put(data)
+        maxMsg -= 1
+        lock.release()
+        lockOther.release() #release the lock so that the consumer knows he can take things from the queue
 
 #this function is for the consumer thread. This will get the message out of the queue
 #and will sleep the time extracted from the message 
 def makeJob():
-    #critical region is getting things in and out of the queue
-    #block the other threads of accesing the queue while you are accesing it
-    lock.acquire()
-    msg = Qtip.get()
-    #release the lock so that another thread may use the queue
-    lock.release()
-    dataList = msg.split(":")#split the id of the mobile device and the job time
-    mobileID = dataList[0]
-    jobTime = int(dataList[1])
-    #if the id is already in the map then ad the time to get the total
-    if mobileID in M:
-        M[mobileID] = M[mobileID] + jobTime
-    #if not then add a new item to the map and give it a value of jobTime
-    else:
-        M[mobileID] = jobTime
-    #sleep :D
-    time.sleep(jobTime)
+    global Qtip
+    global countmsg
+    while maxMsg or not Qtip.empty():
+        #critical region is getting things in and out of the queue
+        #block the other threads of accesing the queue while you are accesing it
+        lockOther.acquire() #acquire the lock so that he dont take any more from the queue untill the producer releases the lock
+        lock.acquire()
+        msg = Qtip.get()
+        #release the lock so that another thread may use the queue
+        lock.release()
+        dataList = msg.split(":")#split the id of the mobile device and the job time
+        mobileID = dataList[0]
+        jobTime = int(dataList[1])
+        #if the id is already in the map then ad the time to get the total
+        if mobileID in M:
+            M[mobileID] = M[mobileID] + jobTime
+            print M
+        #if not then add a new item to the map and give it a value of jobTime
+        else:
+            M[mobileID] = jobTime
+        #sleep :D
+        time.sleep(jobTime)
+    #print the total time used in the CPU for each mobile device
+    for e in M:
+        print 'Mobile '+ e + ' consumed ' + str(M[e]) +' seconds of CPU time. \n'
 
 #create udp socket
 try :
@@ -69,38 +93,18 @@ try:
 except socket.error:
     sys.exit('Failed to do the bind.')
  
-#now keep talking with the client
-while countmsg < maxMsg:
-    # receive data from client (data, addr)
-    d = s.recvfrom(1024)
-    data = d[0]
-    addr = d[1]
+#create a thread that will recieve the message
+producer = Thread(target=recieve)
+#producer.setDaemon(True)
 
-    if not data: 
-        break
+#create a thread that will take things from the queue and do a job with that info
+consumer = Thread(target=makeJob)
+#consumer.setDaemon(True)
 
-    #create a thread that will recieve the message
-    producer = Thread(target=recieve, args=(data,))
-    producer.setDaemon(True)
-    producer.start()
-
-    #create a thread that will take things from the queue and do a job with that info
-    consumer = Thread(target=makeJob)
-    consumer.setDaemon(True)
-    consumer.start()
-     
-    #create a reply for the mobile device
-    reply = 'OK...' + data
-    
-    #send the reply to the mobile device
-    s.sendto(reply , addr)
-    #print 'Message[' + addr[0] + ':' + str(addr[1]) + '] - ' + data.strip()
-    #print the total time used in the CPU for each mobile device
+producer.start()
+consumer.start()
 
 producer.join()
 consumer.join()
 
 s.close()
-
-for e in M:
-    print 'Mobile '+ e + ' consumed ' + str(M[e]) +' seconds of CPU time. \n'
