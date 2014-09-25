@@ -18,7 +18,6 @@ HOST = ''
 PORT = int(sys.argv[1])
 Qtip = Queue()
 M = {}
-maxMsg = 5
 
 #semaphore named lock. This will protect the critical region
 lock = Semaphore()
@@ -28,25 +27,19 @@ lockOther = Semaphore(0)
 #this function is for the producer thread. This will take the message recieved from mobile devices
 #and put them in a queue
 def recieve():
-    global maxMsg
+    countP = 10
     global Qtip
-    while maxMsg:
+    while countP:
         # receive data from client (data, addr)
         d = s.recvfrom(1024)
         data = d[0]
-        addr = d[1]
 
         if not data: 
             break
 
-        #create a reply for the mobile device
-        reply = 'OK...' + data
-        #send the reply to the mobile device
-        s.sendto(reply , addr)
-
         lock.acquire()
-        Qtip.put(data)
-        maxMsg -= 1
+        Qtip.put(d)
+        countP -= 1
         lock.release()
         lockOther.release() #release the lock so that the consumer knows he can take things from the queue
 
@@ -54,27 +47,36 @@ def recieve():
 #and will sleep the time extracted from the message 
 def makeJob():
     global Qtip
-    global countmsg
-    while maxMsg or not Qtip.empty():
+    countC = 10
+    while countC:
         #critical region is getting things in and out of the queue
         #block the other threads of accesing the queue while you are accesing it
         lockOther.acquire() #acquire the lock so that he dont take any more from the queue untill the producer releases the lock
         lock.acquire()
-        msg = Qtip.get()
+        d = Qtip.get()
         #release the lock so that another thread may use the queue
         lock.release()
-        dataList = msg.split(":")#split the id of the mobile device and the job time
+        data = d[0]
+        addr = d[1]
+        dataList = data.split(":")#split the id of the mobile device and the job time
         mobileID = dataList[0]
         jobTime = int(dataList[1])
         #if the id is already in the map then ad the time to get the total
         if mobileID in M:
             M[mobileID] = M[mobileID] + jobTime
-            print M
         #if not then add a new item to the map and give it a value of jobTime
         else:
             M[mobileID] = jobTime
         #sleep :D
+        
         time.sleep(jobTime)
+        print 'Mobile '+ mobileID + ' is using '+ str(jobTime) + ' seconds in the CPU.'
+        #create a reply for the mobile device
+        reply = 'OK...' + data
+        #send the reply to the mobile device
+        s.sendto(reply , addr)
+        countC -= 1
+    print
     #print the total time used in the CPU for each mobile device
     for e in M:
         print 'Mobile '+ e + ' consumed ' + str(M[e]) +' seconds of CPU time. \n'

@@ -5,6 +5,7 @@
 import socket
 import sys
 from random import randrange
+import time
 
 #when not all parameters were given
 if len(sys.argv) != 4:
@@ -26,6 +27,8 @@ maxTime = 10
 numJobs = 5
 #Tlist is a list with all the random numbers
 Tlist = []
+#max time to wait before sending a message
+randtime = 5
 
 #this loop creats a list with random numbers converted to strings
 for k in range(numJobs):
@@ -34,7 +37,8 @@ for k in range(numJobs):
 for e in Tlist:
     #create a mesage with the id of the mobile device and the time of the job (3:7)
     msg = mID+':'+ str(e)
-     
+    random = randrange(randtime)+1
+    time.sleep(random)
     try :
         #send the message to the server
         s.sendto(msg, (host, port))
